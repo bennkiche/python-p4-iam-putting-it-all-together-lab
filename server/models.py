@@ -2,6 +2,7 @@ from sqlalchemy.orm import validates
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy import event
 from sqlalchemy.ext.declarative import declarative_base
+from werkzeug.security import generate_password_hash, check_password_hash
 
 from config import db, bcrypt
 
@@ -10,29 +11,32 @@ Base = declarative_base()
 
 class User(db.Model):
     __tablename__ = 'users'
+    serialize_rules = ('-recipes.user', '-_password_hash',)
 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String, nullable=False, unique=True)
-    _password_hash = db.Column(db.String)
-    image_url = db.Column(db.String)
-    bio = db.Column(db.String)
+    _password_hash = db.Column(db.String(128), nullable=False)
+    image_url = db.Column(db.String ,default='')
+    bio = db.Column(db.String ,default='')
 
     # Ensure the relationship to Recipe is correctly set up
     recipes = db.relationship('Recipe', backref='user', lazy=True)
+    
 
     # Prevent reading password directly
     @property
     def password(self):
-        raise AttributeError("Password is not readable.")
+        raise AttributeError("Password is not a readable attribute")
 
-    # Setter for password (sets the hashed password)
     @password.setter
-    def password(self, plaintext_password):
-        self._password_hash = bcrypt.generate_password_hash(plaintext_password).decode('utf-8')
+    def password(self, password):
+        self._password_hash = generate_password_hash(password)
 
-    # Method to check password
     def check_password(self, password):
-        return bcrypt.check_password_hash(self._password_hash, password)
+        return check_password_hash(self._password_hash, password)
+
+    def authenticate(self, password):
+        return self.check_password(password)
         
 class Recipe(db.Model):
     __tablename__ = 'recipes'
@@ -41,7 +45,7 @@ class Recipe(db.Model):
     title = db.Column(db.String, nullable=False)
     instructions = db.Column(db.String, nullable=False)
     minutes_to_complete = db.Column(db.Integer, nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
     @staticmethod
     def validate_instructions_length(target, value, oldvalue, initiator):

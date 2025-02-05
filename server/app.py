@@ -67,11 +67,16 @@ class Login(Resource):
 
 class Logout(Resource):
     def delete(self):
-        if 'user_id' in session:
-            session.pop('user_id')
-            return '', 204  
+        # Check if the user is logged in
+        if not session.get('user_id'):
+            return {'error': 'Unauthorized'}, 401
         
-        return jsonify({'error': 'Unauthorized'}), 401
+        # Clear the session if user is logged in
+        session.pop('user_id', None)
+        return {}, 204
+
+
+
 
 class CheckSession(Resource):
     def get(self):
@@ -93,52 +98,49 @@ class CheckSession(Resource):
 
 class RecipeIndex(Resource):
     def get(self):
-        if 'user_id' not in session:
-            return jsonify({'error': 'Unauthorized'}), 401
-        recipes = Recipe.query.all()
-        return jsonify([
-            {
-                'title': recipe.title,
-                'instructions': recipe.instructions,
-                'minutes_to_complete': recipe.minutes_to_complete,
-                'user': {
-                    'id': recipe.user.id,
-                    'username': recipe.user.username,
-                    'image_url': recipe.user.image_url,
-                    'bio': recipe.user.bio
-                }
-            } for recipe in recipes
-        ]), 200
-    
+        # Validate user session
+        user_id = session.get('user_id')
+        if not user_id:
+            return {'error': 'Unauthorized'}, 401
+
+        user = User.query.get(user_id)
+        if not user:
+            return {'error': 'User not found'}, 404
+
+        return [recipe.to_dict() for recipe in user.recipes], 200
+
+
+        
     def post(self):
-        if 'user_id' not in session:
-            return jsonify({'error': 'Unauthorized'}), 401
-        data = request.get_json()
+        user_id = session.get('user_id')
+        if not user_id:
+            return {'error': 'Unauthorized'}, 401
+
+        request_json = request.get_json()
+
+        title = request_json.get('title')
+        instructions = request_json.get('instructions')
+        minutes_to_complete = request_json.get('minutes_to_complete')
+
+        if not all([title, instructions, minutes_to_complete]):
+            return {'error': 'Missing required fields'}, 422
+
         try:
-            new_recipe = Recipe(
-                title=data['title'],
-                instructions=data['instructions'],
-                minutes_to_complete=data['minutes_to_complete'],
-                user_id=session['user_id']
+            recipe = Recipe(
+                title=title,
+                instructions=instructions,
+                minutes_to_complete=minutes_to_complete,
+                user_id=user_id,
             )
-            db.session.add(new_recipe)
+
+            db.session.add(recipe)
             db.session.commit()
-            return jsonify({
-                'title': new_recipe.title,
-                'instructions': new_recipe.instructions,
-                'minutes_to_complete': new_recipe.minutes_to_complete,
-                'user': {
-                    'id': new_recipe.user.id,
-                    'username': new_recipe.user.username,
-                    'image_url': new_recipe.user.image_url,
-                    'bio': new_recipe.user.bio
-                }
-            }), 201
-        except Exception as e:
+
+            return recipe.to_dict(), 201
+
+        except IntegrityError:
             db.session.rollback()
-            return ({'error': str(e)}), 422
-
-
+            return {'error': 'Unprocessable Entity'}, 422
 api.add_resource(Signup, '/signup', endpoint='signup')
 api.add_resource(CheckSession, '/check_session', endpoint='check_session')
 api.add_resource(Login, '/login', endpoint='login')
